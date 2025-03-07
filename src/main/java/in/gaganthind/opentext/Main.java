@@ -3,6 +3,7 @@ package in.gaganthind.opentext;
 import java.util.*;
 import java.util.concurrent.*;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.concurrent.locks.ReentrantReadWriteLock;
 
 public class Main {
 
@@ -63,7 +64,7 @@ public class Main {
 
         private int currentThreadCount;
 
-        private final Map<String, Object> mutexMap;
+        private final Map<String, ReentrantReadWriteLock> mutexMap;
 
         private TaskExecutorService(int numberOfThreads) {
             threadLimit = Math.min(numberOfThreads, Runtime.getRuntime().availableProcessors());
@@ -83,7 +84,7 @@ public class Main {
                 throw new NullPointerException("Provided task is null");
             }
 
-            mutexMap.computeIfAbsent(task.taskGroup.groupUUID.toString(), k -> new Object());
+            mutexMap.computeIfAbsent(task.taskGroup.groupUUID.toString(), k -> new ReentrantReadWriteLock());
 
             RunnableFuture<T> futureTask = new FutureTask<>(task.taskAction);
             workQueue.offer(new TaskWithFutureTask(task, futureTask));
@@ -115,9 +116,9 @@ public class Main {
     static class Worker implements Runnable {
         private final BlockingQueue<TaskWithFutureTask> blockingQueue;
         private final Thread thread;
-        private final Map<String, Object> mutexMap;
+        private final Map<String, ReentrantReadWriteLock> mutexMap;
 
-        Worker(BlockingQueue<TaskWithFutureTask> blockingQueue, Map<String, Object> mutexMap) {
+        Worker(BlockingQueue<TaskWithFutureTask> blockingQueue, Map<String, ReentrantReadWriteLock> mutexMap) {
             this.blockingQueue = blockingQueue;
             this.thread = new Thread(this);
             this.mutexMap = mutexMap;
@@ -134,10 +135,25 @@ public class Main {
                     break;
                 }
 
-                synchronized (mutexMap.get(task.task.taskGroup.groupUUID.toString())) {
-                    System.out.printf("Started - Task %s belonging to group %s with thread %s - start time : %d%n", task.task.taskUUID, task.task.taskGroup.groupUUID, Thread.currentThread().getName(), System.currentTimeMillis());
-                    task.futureTask.run();
-                    System.out.printf("Finished - Task %s belonging to group %s with thread %s - end time : %d%n", task.task.taskUUID, task.task.taskGroup.groupUUID, Thread.currentThread().getName(), System.currentTimeMillis());
+                var lock = mutexMap.get(task.task.taskGroup.groupUUID.toString());
+                if (TaskType.WRITE == task.task.taskType) {
+                    try {
+                        lock.writeLock().lock();
+                        System.out.printf("Started - %s Task %s belonging to group %s with thread %s - start time : %d%n", task.task.taskType, task.task.taskUUID, task.task.taskGroup.groupUUID, Thread.currentThread().getName(), System.currentTimeMillis());
+                        task.futureTask.run();
+                        System.out.printf("Finished - %s Task %s belonging to group %s with thread %s - end time : %d%n", task.task.taskType, task.task.taskUUID, task.task.taskGroup.groupUUID, Thread.currentThread().getName(), System.currentTimeMillis());
+                    } finally {
+                        lock.writeLock().unlock();
+                    }
+                } else {
+                    try {
+                        lock.readLock().lock();
+                        System.out.printf("Started - %s Task %s belonging to group %s with thread %s - start time : %d%n", task.task.taskType, task.task.taskUUID, task.task.taskGroup.groupUUID, Thread.currentThread().getName(), System.currentTimeMillis());
+                        task.futureTask.run();
+                        System.out.printf("Finished - %s Task %s belonging to group %s with thread %s - end time : %d%n", task.task.taskType, task.task.taskUUID, task.task.taskGroup.groupUUID, Thread.currentThread().getName(), System.currentTimeMillis());
+                    } finally {
+                        lock.readLock().unlock();
+                    }
                 }
             }
         }
