@@ -2,8 +2,6 @@ package in.gaganthind.opentext;
 
 import java.util.*;
 import java.util.concurrent.*;
-import java.util.concurrent.locks.Lock;
-import java.util.concurrent.locks.ReentrantLock;
 
 public class Main {
 
@@ -60,7 +58,7 @@ public class Main {
 
         private int currentThreadCount;
 
-        private final Map<String, Lock> mutexMap;
+        private final Map<String, Object> mutexMap;
 
         private TaskExecutorService(int numberOfThreads) {
             threadLimit = Math.min(numberOfThreads, Runtime.getRuntime().availableProcessors());
@@ -80,7 +78,7 @@ public class Main {
                 throw new NullPointerException("Provided task is null");
             }
 
-            mutexMap.computeIfAbsent(task.taskGroup.groupUUID.toString(), k -> new ReentrantLock());
+            mutexMap.computeIfAbsent(task.taskGroup.groupUUID.toString(), k -> new Object());
 
             RunnableFuture<T> futureTask = new FutureTask<>(task.taskAction);
             workQueue.offer(new TaskWithFutureTask(task, futureTask));
@@ -106,14 +104,15 @@ public class Main {
         }
     }
 
-    record TaskWithFutureTask(Task<?> task, RunnableFuture<?> futureTask) { }
+    record TaskWithFutureTask(Task<?> task, RunnableFuture<?> futureTask) {
+    }
 
     static class Worker implements Runnable {
         private final BlockingQueue<TaskWithFutureTask> blockingQueue;
         private final Thread thread;
-        private final Map<String, Lock> mutexMap;
+        private final Map<String, Object> mutexMap;
 
-        Worker(BlockingQueue<TaskWithFutureTask> blockingQueue, Map<String, Lock> mutexMap) {
+        Worker(BlockingQueue<TaskWithFutureTask> blockingQueue, Map<String, Object> mutexMap) {
             this.blockingQueue = blockingQueue;
             this.thread = new Thread(this);
             this.mutexMap = mutexMap;
@@ -121,31 +120,19 @@ public class Main {
 
         @Override
         public void run() {
-            System.out.printf("Thread %s%n", Thread.currentThread().getName());
             while (true) {
-                TaskWithFutureTask peek = blockingQueue.peek();
-                if (peek == null) {
-                    return;
-                }
-                System.out.printf("About to execute group %s having task %s with thread %s%n", peek.task.taskGroup.groupUUID, peek.task.taskUUID, Thread.currentThread().getName());
-
-                Lock lock = mutexMap.get(peek.task.taskGroup.groupUUID.toString());
+                TaskWithFutureTask task;
                 try {
-                    lock.lock();
-                    RunnableFuture<?> runnable;
-                    TaskWithFutureTask task;
-                    try {
-                        task = blockingQueue.take();
-                        runnable = task.futureTask;
-                        System.out.printf("Executing group %s having task %s with thread %s%n", task.task.taskGroup.groupUUID, task.task.taskUUID, Thread.currentThread().getName());
-                    } catch (InterruptedException e) {
-                        System.out.printf("Interrupted the thread %s while executing task%n", Thread.currentThread().getName());
-                        break;
-                    }
-                    runnable.run();
-                    System.out.printf("Task executed with group %s having task %s with thread %s%n", task.task.taskGroup.groupUUID, task.task.taskUUID, Thread.currentThread().getName());
-                } finally {
-                    lock.unlock();
+                    task = blockingQueue.take();
+                } catch (InterruptedException e) {
+                    System.out.printf("Interrupt received for the thread %s%n", Thread.currentThread().getName());
+                    break;
+                }
+
+                synchronized (mutexMap.get(task.task.taskGroup.groupUUID.toString())) {
+                    System.out.printf("Started - Task %s belonging to group %s with thread %s%n", task.task.taskUUID, task.task.taskGroup.groupUUID, Thread.currentThread().getName());
+                    task.futureTask.run();
+                    System.out.printf("Finished - Task %s belonging to group %s with thread %s%n", task.task.taskUUID, task.task.taskGroup.groupUUID, Thread.currentThread().getName());
                 }
             }
         }
