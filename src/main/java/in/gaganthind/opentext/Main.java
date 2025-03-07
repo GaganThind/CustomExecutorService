@@ -46,8 +46,10 @@ public class Main {
                 .forEach(job -> {
                     try {
                         System.out.println(job.get());
-                    } catch (InterruptedException | ExecutionException e) {
-                        throw new RuntimeException(e);
+                    } catch (InterruptedException e) {
+                        System.out.printf("Job interrupted with exception: %s%n", e.getMessage());
+                    } catch (ExecutionException e) {
+                        System.out.printf("Job failed with exception: %s%n", e.getMessage());
                     }
                 });
 
