@@ -130,9 +130,9 @@ public class Main {
                 }
 
                 synchronized (mutexMap.get(task.task.taskGroup.groupUUID.toString())) {
-                    System.out.printf("Started - Task %s belonging to group %s with thread %s%n", task.task.taskUUID, task.task.taskGroup.groupUUID, Thread.currentThread().getName());
+                    System.out.printf("Started - Task %s belonging to group %s with thread %s - start time : %d%n", task.task.taskUUID, task.task.taskGroup.groupUUID, Thread.currentThread().getName(), System.currentTimeMillis());
                     task.futureTask.run();
-                    System.out.printf("Finished - Task %s belonging to group %s with thread %s%n", task.task.taskUUID, task.task.taskGroup.groupUUID, Thread.currentThread().getName());
+                    System.out.printf("Finished - Task %s belonging to group %s with thread %s - end time : %d%n", task.task.taskUUID, task.task.taskGroup.groupUUID, Thread.currentThread().getName(), System.currentTimeMillis());
                 }
             }
         }
