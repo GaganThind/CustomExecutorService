@@ -51,7 +51,7 @@ public class Main {
         var taskSix = new Task<>(UUID.randomUUID(), taskGroupThree, TaskType.READ, readTwo);
 
         List<Future<String>> jobs = new ArrayList<>();
-        TaskExecutorService taskExecutor = new TaskExecutorService(3);
+        TaskExecutorService taskExecutor = TaskExecutorService.newFixedThreadPool(2);
         jobs.add(taskExecutor.submitTask(taskOne));
         jobs.add(taskExecutor.submitTask(taskTwo));
         jobs.add(taskExecutor.submitTask(taskThree));
@@ -72,25 +72,26 @@ public class Main {
 
     static class TaskExecutorService implements TaskExecutor {
 
-        private final static int MAX_ALLOWED_THREADS = Runtime.getRuntime().availableProcessors();
-
         private final Set<Worker> workerQueue;
 
         private final int threadLimit;
 
-        private final BlockingQueue<RunnableFuture<?>> workQueue;
+        private final BlockingQueue<TaskWithFutureTask> workQueue;
 
         private int currentThreadCount;
 
-        public TaskExecutorService() {
-            this(MAX_ALLOWED_THREADS);
-        }
+        private final Map<String, Object> mutexMap;
 
-        public TaskExecutorService(int numberOfThreads) {
-            threadLimit = Math.min(numberOfThreads, MAX_ALLOWED_THREADS);
+        private TaskExecutorService(int numberOfThreads) {
+            threadLimit = Math.min(numberOfThreads, Runtime.getRuntime().availableProcessors());
             workerQueue = new HashSet<>(threadLimit);
             currentThreadCount = 0;
             workQueue = new LinkedBlockingQueue<>();
+            mutexMap = new ConcurrentHashMap<>();
+        }
+
+        public static TaskExecutorService newFixedThreadPool(int numberOfThreads) {
+            return new TaskExecutorService(numberOfThreads);
         }
 
         @Override
@@ -99,45 +100,69 @@ public class Main {
                 throw new NullPointerException("Provided task is null");
             }
 
-            RunnableFuture<T> futureTask = new FutureTask<>(task.taskAction);
-            workQueue.offer(futureTask);
+            mutexMap.computeIfAbsent(task.taskGroup.groupUUID.toString(), k -> new Object());
 
-            if (currentThreadCount < threadLimit) {
-                currentThreadCount++;
-                Worker worker = new Worker(workQueue);
-                workerQueue.add(worker);
-                worker.thread.start();
-            }
+            RunnableFuture<T> futureTask = new FutureTask<>(task.taskAction);
+            workQueue.offer(new TaskWithFutureTask(task, futureTask));
+
+            addWorkerIfNeeded();
 
             return futureTask;
         }
 
+        private void addWorkerIfNeeded() {
+            if (currentThreadCount < threadLimit) {
+                currentThreadCount++;
+                Worker worker = new Worker(workQueue, mutexMap);
+                workerQueue.add(worker);
+                worker.thread.start();
+            }
+        }
+
         public void shutdown() {
+
             for (Worker worker : workerQueue) {
                 worker.thread.interrupt();
             }
         }
     }
 
-    static class Worker implements Runnable {
-        private final BlockingQueue<RunnableFuture<?>> blockingQueue;
-        private final Thread thread;
+    record TaskWithFutureTask(Task<?> task, RunnableFuture<?> futureTask) { }
 
-        Worker(BlockingQueue<RunnableFuture<?>> blockingQueue) {
+    static class Worker implements Runnable {
+        private final BlockingQueue<TaskWithFutureTask> blockingQueue;
+        private final Thread thread;
+        private final Map<String, Object> mutexMap;
+
+        Worker(BlockingQueue<TaskWithFutureTask> blockingQueue, Map<String, Object> mutexMap) {
             this.blockingQueue = blockingQueue;
             this.thread = new Thread(this);
+            this.mutexMap = mutexMap;
         }
 
         @Override
         public void run() {
+            System.out.printf("Thread %s%n", Thread.currentThread().getName());
             while (true) {
-                RunnableFuture<?> runnable;
-                try {
-                    runnable = blockingQueue.take();
-                } catch (InterruptedException e) {
-                    break;
+                TaskWithFutureTask peek = blockingQueue.peek();
+                if (peek == null) {
+                    return;
                 }
-                runnable.run();
+                System.out.printf("About to execute group %s having task %s with thread %s%n", peek.task.taskGroup.groupUUID, peek.task.taskUUID, Thread.currentThread().getName());
+                synchronized (mutexMap.get(peek.task.taskGroup.groupUUID.toString())) {
+                    RunnableFuture<?> runnable;
+                    TaskWithFutureTask task;
+                    try {
+                        task = blockingQueue.take();
+                        runnable = task.futureTask;
+                        System.out.printf("Executing group %s having task %s with thread %s%n", task.task.taskGroup.groupUUID, task.task.taskUUID, Thread.currentThread().getName());
+                    } catch (InterruptedException e) {
+                        System.out.printf("Interrupted the thread %s while executing task%n", Thread.currentThread().getName());
+                        break;
+                    }
+                    runnable.run();
+                    System.out.printf("Task executed with group %s having task %s with thread %s%n", task.task.taskGroup.groupUUID, task.task.taskUUID, Thread.currentThread().getName());
+                }
             }
         }
     }
