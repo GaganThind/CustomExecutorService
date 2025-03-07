@@ -18,17 +18,23 @@ public class Main {
         // Group One
         var taskGroupOne = new TaskGroup(UUID.randomUUID());
         tasks.add(new Task<>(UUID.randomUUID(), taskGroupOne, TaskType.WRITE, work));
-        tasks.addAll(Collections.nCopies(5, new Task<>(UUID.randomUUID(), taskGroupOne, TaskType.READ, work)));
+        for (int j = 0; j < 4; j++) {
+            tasks.add(new Task<>(UUID.randomUUID(), taskGroupOne, TaskType.READ, work));
+        }
 
         // Group Two
         var taskGroupTwo = new TaskGroup(UUID.randomUUID());
         tasks.add(new Task<>(UUID.randomUUID(), taskGroupTwo, TaskType.WRITE, work));
-        tasks.addAll(Collections.nCopies(5, new Task<>(UUID.randomUUID(), taskGroupTwo, TaskType.READ, work)));
+        for (int j = 0; j < 4; j++) {
+            tasks.add(new Task<>(UUID.randomUUID(), taskGroupTwo, TaskType.READ, work));
+        }
 
         // Group Three
         var taskGroupThree = new TaskGroup(UUID.randomUUID());
         tasks.add(new Task<>(UUID.randomUUID(), taskGroupThree, TaskType.WRITE, work));
-        tasks.addAll(Collections.nCopies(5, new Task<>(UUID.randomUUID(), taskGroupThree, TaskType.READ, work)));
+        for (int j = 0; j < 4; j++) {
+            tasks.add(new Task<>(UUID.randomUUID(), taskGroupThree, TaskType.READ, work));
+        }
 
         // Execute the jobs
         TaskExecutorService taskExecutor = TaskExecutorService.newFixedThreadPool(6);
