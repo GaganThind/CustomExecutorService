@@ -2,54 +2,34 @@ package in.gaganthind.opentext;
 
 import java.util.*;
 import java.util.concurrent.*;
+import java.util.concurrent.locks.Lock;
+import java.util.concurrent.locks.ReentrantLock;
 
 public class Main {
 
     public static void main(String[] args) {
         // Group One
         var taskGroupOne = new TaskGroup(UUID.randomUUID());
-
-        Callable<String> readFive = () -> {
-//            Thread.sleep(7000);
-            return Thread.currentThread().getName() + " : " + 5;
-        };
-        Callable<String> readSix = () -> {
-//            Thread.sleep(8000);
-            return Thread.currentThread().getName() + " : " + 6;
-        };
-
+        Callable<String> readFive = () -> Thread.currentThread().getName() + " : " + 5;
+        Callable<String> readSix = () -> Thread.currentThread().getName() + " : " + 6;
         var taskOne = new Task<>(UUID.randomUUID(), taskGroupOne, TaskType.WRITE, readFive);
         var taskTwo = new Task<>(UUID.randomUUID(), taskGroupOne, TaskType.READ, readSix);
 
         // Group Two
         var taskGroupTwo = new TaskGroup(UUID.randomUUID());
-        Callable<String> readFour = () -> {
-//            Thread.sleep(2000);
-            return Thread.currentThread().getName() + " : " + 4;
-        };
-        Callable<String> readSeven = () -> {
-//            Thread.sleep(6000);
-            return Thread.currentThread().getName() + " : " + 7;
-        };
-
+        Callable<String> readFour = () -> Thread.currentThread().getName() + " : " + 4;
+        Callable<String> readSeven = () -> Thread.currentThread().getName() + " : " + 7;
         var taskThree = new Task<>(UUID.randomUUID(), taskGroupTwo, TaskType.WRITE, readFour);
         var taskFour = new Task<>(UUID.randomUUID(), taskGroupTwo, TaskType.READ, readSeven);
 
         // Group Three
         var taskGroupThree = new TaskGroup(UUID.randomUUID());
-
-        Callable<String> readOne = () -> {
-//            Thread.sleep(7000);
-            return Thread.currentThread().getName() + " : " + 1;
-        };
-        Callable<String> readTwo = () -> {
-//            Thread.sleep(8000);
-            return Thread.currentThread().getName() + " : " + 2;
-        };
-
+        Callable<String> readOne = () -> Thread.currentThread().getName() + " : " + 1;
+        Callable<String> readTwo = () -> Thread.currentThread().getName() + " : " + 2;
         var taskFive = new Task<>(UUID.randomUUID(), taskGroupThree, TaskType.WRITE, readOne);
         var taskSix = new Task<>(UUID.randomUUID(), taskGroupThree, TaskType.READ, readTwo);
 
+        // Execute the jobs
         List<Future<String>> jobs = new ArrayList<>();
         TaskExecutorService taskExecutor = TaskExecutorService.newFixedThreadPool(2);
         jobs.add(taskExecutor.submitTask(taskOne));
@@ -80,7 +60,7 @@ public class Main {
 
         private int currentThreadCount;
 
-        private final Map<String, Object> mutexMap;
+        private final Map<String, Lock> mutexMap;
 
         private TaskExecutorService(int numberOfThreads) {
             threadLimit = Math.min(numberOfThreads, Runtime.getRuntime().availableProcessors());
@@ -100,7 +80,7 @@ public class Main {
                 throw new NullPointerException("Provided task is null");
             }
 
-            mutexMap.computeIfAbsent(task.taskGroup.groupUUID.toString(), k -> new Object());
+            mutexMap.computeIfAbsent(task.taskGroup.groupUUID.toString(), k -> new ReentrantLock());
 
             RunnableFuture<T> futureTask = new FutureTask<>(task.taskAction);
             workQueue.offer(new TaskWithFutureTask(task, futureTask));
@@ -120,7 +100,6 @@ public class Main {
         }
 
         public void shutdown() {
-
             for (Worker worker : workerQueue) {
                 worker.thread.interrupt();
             }
@@ -132,9 +111,9 @@ public class Main {
     static class Worker implements Runnable {
         private final BlockingQueue<TaskWithFutureTask> blockingQueue;
         private final Thread thread;
-        private final Map<String, Object> mutexMap;
+        private final Map<String, Lock> mutexMap;
 
-        Worker(BlockingQueue<TaskWithFutureTask> blockingQueue, Map<String, Object> mutexMap) {
+        Worker(BlockingQueue<TaskWithFutureTask> blockingQueue, Map<String, Lock> mutexMap) {
             this.blockingQueue = blockingQueue;
             this.thread = new Thread(this);
             this.mutexMap = mutexMap;
@@ -149,7 +128,10 @@ public class Main {
                     return;
                 }
                 System.out.printf("About to execute group %s having task %s with thread %s%n", peek.task.taskGroup.groupUUID, peek.task.taskUUID, Thread.currentThread().getName());
-                synchronized (mutexMap.get(peek.task.taskGroup.groupUUID.toString())) {
+
+                Lock lock = mutexMap.get(peek.task.taskGroup.groupUUID.toString());
+                try {
+                    lock.lock();
                     RunnableFuture<?> runnable;
                     TaskWithFutureTask task;
                     try {
@@ -162,6 +144,8 @@ public class Main {
                     }
                     runnable.run();
                     System.out.printf("Task executed with group %s having task %s with thread %s%n", task.task.taskGroup.groupUUID, task.task.taskUUID, Thread.currentThread().getName());
+                } finally {
+                    lock.unlock();
                 }
             }
         }
