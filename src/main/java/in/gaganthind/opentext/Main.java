@@ -2,50 +2,49 @@ package in.gaganthind.opentext;
 
 import java.util.*;
 import java.util.concurrent.*;
+import java.util.concurrent.atomic.AtomicInteger;
 
 public class Main {
 
     public static void main(String[] args) {
+        var i = new AtomicInteger();
+        Callable<String> work = () -> {
+            Thread.sleep(100);
+            return Thread.currentThread().getName() + " : " + (i.incrementAndGet());
+        };
+
+        List<Task<String>> tasks = new ArrayList<>();
+
         // Group One
         var taskGroupOne = new TaskGroup(UUID.randomUUID());
-        Callable<String> readFive = () -> Thread.currentThread().getName() + " : " + 5;
-        Callable<String> readSix = () -> Thread.currentThread().getName() + " : " + 6;
-        var taskOne = new Task<>(UUID.randomUUID(), taskGroupOne, TaskType.WRITE, readFive);
-        var taskTwo = new Task<>(UUID.randomUUID(), taskGroupOne, TaskType.READ, readSix);
+        tasks.add(new Task<>(UUID.randomUUID(), taskGroupOne, TaskType.WRITE, work));
+        tasks.addAll(Collections.nCopies(5, new Task<>(UUID.randomUUID(), taskGroupOne, TaskType.READ, work)));
 
         // Group Two
         var taskGroupTwo = new TaskGroup(UUID.randomUUID());
-        Callable<String> readFour = () -> Thread.currentThread().getName() + " : " + 4;
-        Callable<String> readSeven = () -> Thread.currentThread().getName() + " : " + 7;
-        var taskThree = new Task<>(UUID.randomUUID(), taskGroupTwo, TaskType.WRITE, readFour);
-        var taskFour = new Task<>(UUID.randomUUID(), taskGroupTwo, TaskType.READ, readSeven);
+        tasks.add(new Task<>(UUID.randomUUID(), taskGroupTwo, TaskType.WRITE, work));
+        tasks.addAll(Collections.nCopies(5, new Task<>(UUID.randomUUID(), taskGroupTwo, TaskType.READ, work)));
 
         // Group Three
         var taskGroupThree = new TaskGroup(UUID.randomUUID());
-        Callable<String> readOne = () -> Thread.currentThread().getName() + " : " + 1;
-        Callable<String> readTwo = () -> Thread.currentThread().getName() + " : " + 2;
-        var taskFive = new Task<>(UUID.randomUUID(), taskGroupThree, TaskType.WRITE, readOne);
-        var taskSix = new Task<>(UUID.randomUUID(), taskGroupThree, TaskType.READ, readTwo);
+        tasks.add(new Task<>(UUID.randomUUID(), taskGroupThree, TaskType.WRITE, work));
+        tasks.addAll(Collections.nCopies(5, new Task<>(UUID.randomUUID(), taskGroupThree, TaskType.READ, work)));
 
         // Execute the jobs
-        List<Future<String>> jobs = new ArrayList<>();
-        TaskExecutorService taskExecutor = TaskExecutorService.newFixedThreadPool(2);
-        jobs.add(taskExecutor.submitTask(taskOne));
-        jobs.add(taskExecutor.submitTask(taskTwo));
-        jobs.add(taskExecutor.submitTask(taskThree));
-        jobs.add(taskExecutor.submitTask(taskFour));
-        jobs.add(taskExecutor.submitTask(taskFive));
-        jobs.add(taskExecutor.submitTask(taskSix));
+        TaskExecutorService taskExecutor = TaskExecutorService.newFixedThreadPool(6);
 
-        try {
-            for (Future<String> job : jobs) {
-                System.out.println(job.get());
-            }
-        } catch (InterruptedException | ExecutionException e) {
-            throw new RuntimeException(e);
-        } finally {
-            taskExecutor.shutdown();
-        }
+        tasks.stream()
+                .map(taskExecutor::submitTask)
+                .toList()
+                .forEach(job -> {
+                    try {
+                        System.out.println(job.get());
+                    } catch (InterruptedException | ExecutionException e) {
+                        throw new RuntimeException(e);
+                    }
+                });
+
+        taskExecutor.shutdown();
     }
 
     static class TaskExecutorService implements TaskExecutor {
