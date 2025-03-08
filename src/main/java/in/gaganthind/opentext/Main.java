@@ -11,7 +11,7 @@ public class Main {
         var i = new AtomicInteger();
         Callable<String> work = () -> {
             Thread.sleep(100);
-            return Thread.currentThread().getName() + " : " + (i.incrementAndGet());
+            return Thread.currentThread().getName() + " result is : " + (i.incrementAndGet());
         };
 
         List<Task<String>> tasks = new ArrayList<>();
@@ -56,6 +56,16 @@ public class Main {
         taskExecutor.shutdown();
     }
 
+    /**
+     * TaskExecutor implementation class providing below-mentioned functionality.
+     *     1. Tasks can be submitted concurrently. Task submission should not block the submitter.
+     *     2. Tasks are executed asynchronously and concurrently. Maximum allowed concurrency may be restricted.
+     *     3. Once task is finished, its results can be retrieved from the Future received during task submission.
+     *     4. The order of tasks must be preserved.
+     *         ◦ The first task submitted must be the first task started.
+     *         ◦ The task result should be available as soon as possible after the task completes.
+     *     5. Tasks sharing the same TaskGroup must not run concurrently.
+     */
     static class TaskExecutorService implements TaskExecutor {
 
         private final Set<Worker> workers;
@@ -66,6 +76,10 @@ public class Main {
 
         private int currentThreadCount;
 
+        /**
+         * Map based on TaskGroup.groupUUID (as key) and a mutex object (as value).
+         * For a given TaskGroup.groupUUID, only one thread would be able to execute as only 1 mutex object is available.
+         */
         private final Map<String, ReentrantReadWriteLock> mutexMap;
 
         private TaskExecutorService(int numberOfThreads) {
@@ -76,6 +90,12 @@ public class Main {
             mutexMap = new ConcurrentHashMap<>();
         }
 
+        /**
+         * Creating new TaskExecutorService instance using provided max thread count.
+         *
+         * @param numberOfThreads - Total number of maximum threads allowed in the thread-pool.
+         * @return TaskExecutorService instance
+         */
         public static TaskExecutorService newFixedThreadPool(int numberOfThreads) {
             return new TaskExecutorService(numberOfThreads);
         }
@@ -88,6 +108,10 @@ public class Main {
 
             mutexMap.computeIfAbsent(task.taskGroup.groupUUID.toString(), k -> new ReentrantReadWriteLock());
 
+            /*
+             * Callable (provided in the task) will be run by the FutureTask, it will return a Future that the user can use to get the results later.
+             * The workers will run the FutureTask as a runnable and result can be fetched later.
+             */
             RunnableFuture<T> futureTask = new FutureTask<>(task.taskAction);
             workQueue.offer(new TaskWithFutureTask(task, futureTask));
 
@@ -96,15 +120,24 @@ public class Main {
             return futureTask;
         }
 
+        /**
+         * Add a worker only when the worker count is less than maxThreadLimit.
+         * Otherwise, the existing workers will pull tasks from the workQueue.
+         */
         private void addWorkerIfNeeded() {
-            if (currentThreadCount < maxThreadLimit) {
-                currentThreadCount++;
-                Worker worker = new Worker(workQueue, mutexMap);
-                workers.add(worker);
-                worker.thread.start();
+            if (currentThreadCount >= maxThreadLimit) {
+                return;
             }
+
+            currentThreadCount++;
+            Worker worker = new Worker(workQueue, mutexMap);
+            workers.add(worker);
+            worker.thread.start();
         }
 
+        /**
+         * Shutdown functionality for the executor service.
+         */
         public void shutdown() {
             for (Worker worker : workers) {
                 worker.thread.interrupt();
@@ -112,9 +145,18 @@ public class Main {
         }
     }
 
+    /**
+     * Record representing the original task along with the futureTask that was submitted to executor service.
+     *
+     * @param task - Original task submitted to executor service
+     * @param futureTask - RunnableFuture that's created internally by the executor service from the provided task.
+     */
     record TaskWithFutureTask(Task<?> task, RunnableFuture<?> futureTask) {
     }
 
+    /**
+     * Worker that would be running/executing the provided tasks.
+     */
     static class Worker implements Runnable {
         private final BlockingQueue<TaskWithFutureTask> blockingQueue;
         private final Thread thread;
