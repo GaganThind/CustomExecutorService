@@ -58,9 +58,9 @@ public class Main {
 
     static class TaskExecutorService implements TaskExecutor {
 
-        private final Set<Worker> workerQueue;
+        private final Set<Worker> workers;
 
-        private final int threadLimit;
+        private final int maxThreadLimit;
 
         private final BlockingQueue<TaskWithFutureTask> workQueue;
 
@@ -69,8 +69,8 @@ public class Main {
         private final Map<String, ReentrantReadWriteLock> mutexMap;
 
         private TaskExecutorService(int numberOfThreads) {
-            threadLimit = Math.min(numberOfThreads, Runtime.getRuntime().availableProcessors());
-            workerQueue = new HashSet<>(threadLimit);
+            maxThreadLimit = Math.min(numberOfThreads, Runtime.getRuntime().availableProcessors());
+            workers = new HashSet<>(maxThreadLimit);
             currentThreadCount = 0;
             workQueue = new LinkedBlockingQueue<>();
             mutexMap = new ConcurrentHashMap<>();
@@ -97,16 +97,16 @@ public class Main {
         }
 
         private void addWorkerIfNeeded() {
-            if (currentThreadCount < threadLimit) {
+            if (currentThreadCount < maxThreadLimit) {
                 currentThreadCount++;
                 Worker worker = new Worker(workQueue, mutexMap);
-                workerQueue.add(worker);
+                workers.add(worker);
                 worker.thread.start();
             }
         }
 
         public void shutdown() {
-            for (Worker worker : workerQueue) {
+            for (Worker worker : workers) {
                 worker.thread.interrupt();
             }
         }
