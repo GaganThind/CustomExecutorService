@@ -171,30 +171,30 @@ public class Main {
         @Override
         public void run() {
             while (true) {
-                TaskWithFutureTask task;
+                TaskWithFutureTask data;
                 try {
-                    task = blockingQueue.take();
+                    data = blockingQueue.take();
                 } catch (InterruptedException e) {
                     System.out.printf("Interrupt received for the thread %s%n", Thread.currentThread().getName());
                     break;
                 }
 
-                var lock = mutexMap.get(task.task.taskGroup.groupUUID.toString());
-                if (TaskType.WRITE == task.task.taskType) {
+                var lock = mutexMap.get(data.task.taskGroup.groupUUID.toString());
+                if (TaskType.WRITE == data.task.taskType) {
                     try {
                         lock.writeLock().lock();
-                        System.out.printf("Started - %s Task %s belonging to group %s with thread %s - start time : %d%n", task.task.taskType, task.task.taskUUID, task.task.taskGroup.groupUUID, Thread.currentThread().getName(), System.currentTimeMillis());
-                        task.futureTask.run();
-                        System.out.printf("Finished - %s Task %s belonging to group %s with thread %s - end time : %d%n", task.task.taskType, task.task.taskUUID, task.task.taskGroup.groupUUID, Thread.currentThread().getName(), System.currentTimeMillis());
+                        System.out.printf("Started - %s Task %s belonging to group %s with thread %s - start time : %d%n", data.task.taskType, data.task.taskUUID, data.task.taskGroup.groupUUID, Thread.currentThread().getName(), System.currentTimeMillis());
+                        data.futureTask.run();
+                        System.out.printf("Finished - %s Task %s belonging to group %s with thread %s - end time : %d%n", data.task.taskType, data.task.taskUUID, data.task.taskGroup.groupUUID, Thread.currentThread().getName(), System.currentTimeMillis());
                     } finally {
                         lock.writeLock().unlock();
                     }
                 } else {
                     try {
                         lock.readLock().lock();
-                        System.out.printf("Started - %s Task %s belonging to group %s with thread %s - start time : %d%n", task.task.taskType, task.task.taskUUID, task.task.taskGroup.groupUUID, Thread.currentThread().getName(), System.currentTimeMillis());
-                        task.futureTask.run();
-                        System.out.printf("Finished - %s Task %s belonging to group %s with thread %s - end time : %d%n", task.task.taskType, task.task.taskUUID, task.task.taskGroup.groupUUID, Thread.currentThread().getName(), System.currentTimeMillis());
+                        System.out.printf("Started - %s Task %s belonging to group %s with thread %s - start time : %d%n", data.task.taskType, data.task.taskUUID, data.task.taskGroup.groupUUID, Thread.currentThread().getName(), System.currentTimeMillis());
+                        data.futureTask.run();
+                        System.out.printf("Finished - %s Task %s belonging to group %s with thread %s - end time : %d%n", data.task.taskType, data.task.taskUUID, data.task.taskGroup.groupUUID, Thread.currentThread().getName(), System.currentTimeMillis());
                     } finally {
                         lock.readLock().unlock();
                     }
