@@ -78,7 +78,7 @@ public class Main {
 
         /**
          * Map based on TaskGroup.groupUUID (as key) and a ReenterantReadWriteLock (as value).
-         * For a given TaskGroup.groupUUID, only one thread would be able to execute as only 1 mutex object is available.
+         * For a given TaskGroup.groupUUID, only one Write thread and multiple read threads would be able to execute as only 1 mutex object is available.
          */
         private final Map<String, ReentrantReadWriteLock> mutexMap;
 
