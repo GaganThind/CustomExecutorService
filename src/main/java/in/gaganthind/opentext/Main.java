@@ -2,6 +2,7 @@ package in.gaganthind.opentext;
 
 import java.util.*;
 import java.util.concurrent.*;
+import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.concurrent.locks.ReentrantReadWriteLock;
 
@@ -54,6 +55,7 @@ public class Main {
                 });
 
         taskExecutor.shutdown();
+        taskExecutor.submitTask(new Task<>(UUID.randomUUID(), taskGroupThree, TaskType.WRITE, work));
     }
 
     /**
@@ -76,6 +78,8 @@ public class Main {
 
         private int currentThreadCount;
 
+        private final AtomicBoolean isShutdownRequested;
+
         /**
          * Map based on TaskGroup.groupUUID (as key) and a ReenterantReadWriteLock (as value).
          * For a given TaskGroup.groupUUID, only one Write thread and multiple read threads would be able to execute as only 1 mutex object is available.
@@ -88,6 +92,7 @@ public class Main {
             currentThreadCount = 0;
             workQueue = new LinkedBlockingQueue<>();
             mutexMap = new ConcurrentHashMap<>();
+            isShutdownRequested = new AtomicBoolean(false);
         }
 
         /**
@@ -102,6 +107,10 @@ public class Main {
 
         @Override
         public <T> Future<T> submitTask(Task<T> task) {
+            if (isShutdownRequested.get()) {
+                throw new IllegalStateException("ExecutorService shutdown requested, no more task submission possible");
+            }
+
             if (task == null) {
                 throw new NullPointerException("Provided task is null");
             }
@@ -139,6 +148,7 @@ public class Main {
          * Shutdown functionality for the executor service.
          */
         public void shutdown() {
+            this.isShutdownRequested.set(true);
             for (Worker worker : workers) {
                 worker.thread.interrupt();
             }
