@@ -4,6 +4,8 @@ import java.util.*;
 import java.util.concurrent.*;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
+import java.util.concurrent.locks.Lock;
+import java.util.concurrent.locks.ReentrantLock;
 
 public class Main {
 
@@ -14,11 +16,17 @@ public class Main {
             return Thread.currentThread().getName() + " result is : " + (i.incrementAndGet());
         };
 
+        Callable<String> badTask = () -> {
+            Thread.sleep(100);
+            throw new RuntimeException(Thread.currentThread().getName() + " execution resulted in bad result");
+        };
+
         List<Task<String>> tasks = new ArrayList<>();
 
         // Group One
         var taskGroupOne = new TaskGroup(UUID.randomUUID());
         tasks.add(new Task<>(UUID.randomUUID(), taskGroupOne, TaskType.WRITE, work));
+        tasks.add(new Task<>(UUID.randomUUID(), taskGroupOne, TaskType.WRITE, badTask));
         for (int j = 0; j < 4; j++) {
             tasks.add(new Task<>(UUID.randomUUID(), taskGroupOne, TaskType.READ, work));
         }
@@ -54,7 +62,7 @@ public class Main {
                 });
 
         taskExecutor.shutdown();
-        taskExecutor.submitTask(new Task<>(UUID.randomUUID(), taskGroupThree, TaskType.WRITE, work));
+        //        taskExecutor.submitTask(new Task<>(UUID.randomUUID(), taskGroupThree, TaskType.WRITE, work));
     }
 
     /**
@@ -80,17 +88,17 @@ public class Main {
         private final AtomicBoolean isShutdownRequested;
 
         /**
-         * Map based on TaskGroup.groupUUID (as key) and a mutex object (as value).
-         * For a given TaskGroup.groupUUID, only one thread would be able to execute as only 1 mutex object is available.
+         * Map based on TaskGroup.groupUUID (as key) and lock object (as value).
+         * For a given TaskGroup.groupUUID, only one thread would be able to execute as only 1 lock object is available.
          */
-        private final Map<String, Object> mutexMap;
+        private final Map<String, Lock> lockMap;
 
         private TaskExecutorService(int numberOfThreads) {
             maxThreadLimit = Math.min(numberOfThreads, Runtime.getRuntime().availableProcessors());
             workers = new HashSet<>(maxThreadLimit);
             currentThreadCount = 0;
             workQueue = new LinkedBlockingQueue<>();
-            mutexMap = new ConcurrentHashMap<>();
+            lockMap = new ConcurrentHashMap<>();
             isShutdownRequested = new AtomicBoolean(false);
         }
 
@@ -107,14 +115,14 @@ public class Main {
         @Override
         public <T> Future<T> submitTask(Task<T> task) {
             if (isShutdownRequested.get()) {
-                throw new IllegalStateException("ExecutorService shutdown requested, no more task submission possible");
+                throw new RejectedExecutionException("ExecutorService shutdown requested, no more task submission possible");
             }
 
             if (task == null) {
                 throw new NullPointerException("Provided task is null");
             }
 
-            mutexMap.computeIfAbsent(task.taskGroup.groupUUID.toString(), k -> new Object());
+            lockMap.computeIfAbsent(task.taskGroup.groupUUID.toString(), k -> new ReentrantLock());
 
             /*
              * Callable (provided in the task) will be run by the FutureTask, it will return a Future that the user can use to get the results later.
@@ -138,7 +146,7 @@ public class Main {
             }
 
             currentThreadCount++;
-            Worker worker = new Worker(workQueue, mutexMap);
+            Worker worker = new Worker(workQueue, lockMap);
             workers.add(worker);
             worker.thread.start();
         }
@@ -147,8 +155,20 @@ public class Main {
          * Shutdown functionality for the executor service.
          */
         public void shutdown() {
+            if (isShutdownRequested.get()) {
+                System.err.println("ExecutorService already shutdown.");
+                return;
+            }
+
             this.isShutdownRequested.set(true);
+
             for (Worker worker : workers) {
+                while (worker.isRunning) {
+                    try {
+                        TimeUnit.MILLISECONDS.sleep(100);
+                    } catch (InterruptedException e) {
+                    }
+                }
                 worker.thread.interrupt();
             }
         }
@@ -169,12 +189,14 @@ public class Main {
     static class Worker implements Runnable {
         private final BlockingQueue<TaskWithFutureTask> blockingQueue;
         private final Thread thread;
-        private final Map<String, Object> mutexMap;
+        private final Map<String, Lock> lockMap;
+        private volatile boolean isRunning;
 
-        Worker(BlockingQueue<TaskWithFutureTask> blockingQueue, Map<String, Object> mutexMap) {
+        Worker(BlockingQueue<TaskWithFutureTask> blockingQueue, Map<String, Lock> lockMap) {
             this.blockingQueue = blockingQueue;
             this.thread = new Thread(this);
-            this.mutexMap = mutexMap;
+            this.lockMap = lockMap;
+            this.isRunning = false;
         }
 
         @Override
@@ -188,10 +210,28 @@ public class Main {
                     break;
                 }
 
-                synchronized (mutexMap.get(data.task.taskGroup.groupUUID.toString())) {
-                    System.out.printf("Started - %s Task %s belonging to group %s with thread %s - start time : %d%n", data.task.taskType, data.task.taskUUID, data.task.taskGroup.groupUUID, Thread.currentThread().getName(), System.currentTimeMillis());
-                    data.futureTask.run();
-                    System.out.printf("Finished - %s Task %s belonging to group %s with thread %s - end time : %d%n", data.task.taskType, data.task.taskUUID, data.task.taskGroup.groupUUID, Thread.currentThread().getName(), System.currentTimeMillis());
+                var lock = lockMap.get(data.task.taskGroup.groupUUID.toString());
+                try {
+                    lock.lock();
+                    this.isRunning = true;
+                    System.out.printf("Started - %s Task %s belonging to group %s with thread %s - start time : %d%n",
+                            data.task.taskType, data.task.taskUUID, data.task.taskGroup.groupUUID, Thread.currentThread().getName(), System.currentTimeMillis());
+                    try {
+                        data.futureTask.run();
+                    } catch (Throwable ex) { // Should work but doesn't
+                        var message = ex.getMessage() != null ? ex.getMessage() : "";
+                        System.out.printf("Exception - in %s Task %s belonging to group %s with thread %s - time : %d with message %s%n",
+                                data.task.taskType, data.task.taskUUID, data.task.taskGroup.groupUUID, Thread.currentThread().getName(), System.currentTimeMillis(), message);
+                        throw ex;
+                    } finally {
+                        System.out.printf("Finished - %s Task %s belonging to group %s with thread %s - end time : %d%n",
+                                data.task.taskType, data.task.taskUUID, data.task.taskGroup.groupUUID, Thread.currentThread().getName(), System.currentTimeMillis());
+                    }
+                } finally {
+                    this.isRunning = false;
+                    System.out.printf("Released Lock - %s Task %s belonging to group %s with thread %s - end time : %d%n",
+                            data.task.taskType, data.task.taskUUID, data.task.taskGroup.groupUUID, Thread.currentThread().getName(), System.currentTimeMillis());
+                    lock.unlock();
                 }
             }
         }
