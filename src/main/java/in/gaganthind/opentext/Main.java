@@ -15,11 +15,17 @@ public class Main {
             return Thread.currentThread().getName() + " result is : " + (i.incrementAndGet());
         };
 
+        Callable<String> badTask = () -> {
+            Thread.sleep(100);
+            throw new RuntimeException(Thread.currentThread().getName() + " execution resulted in bad task");
+        };
+
         List<Task<String>> tasks = new ArrayList<>();
 
         // Group One
         var taskGroupOne = new TaskGroup(UUID.randomUUID());
         tasks.add(new Task<>(UUID.randomUUID(), taskGroupOne, TaskType.WRITE, work));
+        tasks.add(new Task<>(UUID.randomUUID(), taskGroupOne, TaskType.WRITE, badTask));
         for (int j = 0; j < 4; j++) {
             tasks.add(new Task<>(UUID.randomUUID(), taskGroupOne, TaskType.READ, work));
         }
@@ -148,8 +154,20 @@ public class Main {
          * Shutdown functionality for the executor service.
          */
         public void shutdown() {
+            if (isShutdownRequested.get()) {
+                System.err.println("ExecutorService already shutdown.");
+                return;
+            }
+
             this.isShutdownRequested.set(true);
+
             for (Worker worker : workers) {
+                while (worker.isRunning) {
+                    try {
+                        TimeUnit.MILLISECONDS.sleep(100);
+                    } catch (InterruptedException e) {
+                    }
+                }
                 worker.thread.interrupt();
             }
         }
@@ -171,11 +189,13 @@ public class Main {
         private final BlockingQueue<TaskWithFutureTask> blockingQueue;
         private final Thread thread;
         private final Map<String, ReentrantReadWriteLock> mutexMap;
+        private volatile boolean isRunning;
 
         Worker(BlockingQueue<TaskWithFutureTask> blockingQueue, Map<String, ReentrantReadWriteLock> mutexMap) {
             this.blockingQueue = blockingQueue;
             this.thread = new Thread(this);
             this.mutexMap = mutexMap;
+            this.isRunning = false;
         }
 
         @Override
@@ -193,22 +213,42 @@ public class Main {
                 if (TaskType.WRITE == data.task.taskType) {
                     try {
                         lock.writeLock().lock();
-                        System.out.printf("Started - %s Task %s belonging to group %s with thread %s - start time : %d%n", data.task.taskType, data.task.taskUUID, data.task.taskGroup.groupUUID, Thread.currentThread().getName(), System.currentTimeMillis());
-                        data.futureTask.run();
-                        System.out.printf("Finished - %s Task %s belonging to group %s with thread %s - end time : %d%n", data.task.taskType, data.task.taskUUID, data.task.taskGroup.groupUUID, Thread.currentThread().getName(), System.currentTimeMillis());
+                        this.isRunning = true;
+                        performTask(data);
                     } finally {
+                        this.isRunning = false;
+                        System.out.printf("Released Lock - %s Task %s belonging to group %s with thread %s - end time : %d%n",
+                                data.task.taskType, data.task.taskUUID, data.task.taskGroup.groupUUID, Thread.currentThread().getName(), System.currentTimeMillis());
                         lock.writeLock().unlock();
                     }
                 } else {
                     try {
                         lock.readLock().lock();
-                        System.out.printf("Started - %s Task %s belonging to group %s with thread %s - start time : %d%n", data.task.taskType, data.task.taskUUID, data.task.taskGroup.groupUUID, Thread.currentThread().getName(), System.currentTimeMillis());
-                        data.futureTask.run();
-                        System.out.printf("Finished - %s Task %s belonging to group %s with thread %s - end time : %d%n", data.task.taskType, data.task.taskUUID, data.task.taskGroup.groupUUID, Thread.currentThread().getName(), System.currentTimeMillis());
+                        this.isRunning = true;
+                        performTask(data);
                     } finally {
+                        this.isRunning = false;
+                        System.out.printf("Released Lock - %s Task %s belonging to group %s with thread %s - end time : %d%n",
+                                data.task.taskType, data.task.taskUUID, data.task.taskGroup.groupUUID, Thread.currentThread().getName(), System.currentTimeMillis());
                         lock.readLock().unlock();
                     }
                 }
+            }
+        }
+
+        private static void performTask(TaskWithFutureTask data) {
+            System.out.printf("Started - %s Task %s belonging to group %s with thread %s - start time : %d%n",
+                    data.task.taskType, data.task.taskUUID, data.task.taskGroup.groupUUID, Thread.currentThread().getName(), System.currentTimeMillis());
+            try {
+                data.futureTask.run();
+            } catch (Throwable ex) { // Should work but doesn't
+                var message = ex.getMessage() != null ? ex.getMessage() : "";
+                System.out.printf("Exception - in %s Task %s belonging to group %s with thread %s - time : %d with message %s%n",
+                        data.task.taskType, data.task.taskUUID, data.task.taskGroup.groupUUID, Thread.currentThread().getName(), System.currentTimeMillis(), message);
+                throw ex;
+            } finally {
+                System.out.printf("Finished - %s Task %s belonging to group %s with thread %s - end time : %d%n",
+                        data.task.taskType, data.task.taskUUID, data.task.taskGroup.groupUUID, Thread.currentThread().getName(), System.currentTimeMillis());
             }
         }
     }
