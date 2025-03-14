@@ -75,7 +75,7 @@ public class Main {
      *         ◦ The task result should be available as soon as possible after the task completes.
      *     5. Tasks sharing the same TaskGroup must not run concurrently.
      */
-    static class TaskExecutorService implements TaskExecutor {
+    private static class TaskExecutorService implements TaskExecutor {
 
         private final Set<Worker> workers;
 
@@ -180,13 +180,13 @@ public class Main {
      * @param task - Original task submitted to executor service
      * @param futureTask - RunnableFuture that's created internally by the executor service from the provided task.
      */
-    record TaskWithFutureTask(Task<?> task, RunnableFuture<?> futureTask) {
+    private record TaskWithFutureTask(Task<?> task, RunnableFuture<?> futureTask) {
     }
 
     /**
      * Worker that would be running/executing the provided tasks.
      */
-    static class Worker implements Runnable {
+    private static class Worker implements Runnable {
         private final BlockingQueue<TaskWithFutureTask> blockingQueue;
         private final Thread thread;
         private final Map<String, Lock> lockMap;
