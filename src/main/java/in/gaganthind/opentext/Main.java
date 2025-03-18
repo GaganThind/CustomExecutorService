@@ -74,6 +74,9 @@ public class Main {
      *         ◦ The first task submitted must be the first task started.
      *         ◦ The task result should be available as soon as possible after the task completes.
      *     5. Tasks sharing the same TaskGroup must not run concurrently.
+     *
+     *     Queue -> Ensure ordering
+     *     Thread-> Single thread
      */
     private static class TaskExecutorService implements TaskExecutor {
 
@@ -83,7 +86,7 @@ public class Main {
 
         private final BlockingQueue<TaskWithFutureTask> workQueue;
 
-        private int currentThreadCount;
+        private final AtomicInteger currentThreadCount;
 
         private final AtomicBoolean isShutdownRequested;
 
@@ -94,9 +97,9 @@ public class Main {
         private final Map<String, Lock> lockMap;
 
         private TaskExecutorService(int numberOfThreads) {
-            maxThreadLimit = Math.min(numberOfThreads, Runtime.getRuntime().availableProcessors());
-            workers = new HashSet<>(maxThreadLimit);
-            currentThreadCount = 0;
+            maxThreadLimit = Math.min(numberOfThreads, Runtime.getRuntime().availableProcessors());//6 -> 8, 10. TODO can be moved to user
+            workers = new HashSet<>(maxThreadLimit);// 0.75 // ArrayList / List
+            currentThreadCount = new AtomicInteger(0);
             workQueue = new LinkedBlockingQueue<>();
             lockMap = new ConcurrentHashMap<>();
             isShutdownRequested = new AtomicBoolean(false);
@@ -122,14 +125,17 @@ public class Main {
                 throw new NullPointerException("Provided task is null");
             }
 
-            lockMap.computeIfAbsent(task.taskGroup.groupUUID.toString(), k -> new ReentrantLock());
+            lockMap.computeIfAbsent(task.taskGroup.groupUUID.toString(), k -> new ReentrantLock(true)); // TODO GroupUUID
 
             /*
              * Callable (provided in the task) will be run by the FutureTask, it will return a Future that the user can use to get the results later.
              * The workers will run the FutureTask as a runnable and result can be fetched later.
              */
             RunnableFuture<T> futureTask = new FutureTask<>(task.taskAction);
-            workQueue.offer(new TaskWithFutureTask(task, futureTask));
+            var isAdded = workQueue.offer(new TaskWithFutureTask(task, futureTask));
+            if (!isAdded) {
+                throw new RejectedExecutionException("Task not added to the queue");
+            }
 
             addWorkerIfNeeded();
 
@@ -141,12 +147,12 @@ public class Main {
          * Otherwise, the existing workers will pull tasks from the workQueue.
          */
         private void addWorkerIfNeeded() {
-            if (currentThreadCount >= maxThreadLimit) {
+            if (currentThreadCount.get() >= maxThreadLimit) { // 4 -> Workers in set/List, 5, 6
                 return;
             }
 
-            currentThreadCount++;
-            Worker worker = new Worker(workQueue, lockMap);
+            currentThreadCount.incrementAndGet(); // TODO Could have caused race condition
+            Worker worker = new Worker(workQueue, lockMap); // TODo Use existing Threadpool
             workers.add(worker);
             worker.thread.start();
         }
@@ -160,13 +166,15 @@ public class Main {
                 return;
             }
 
-            this.isShutdownRequested.set(true);
+            this.isShutdownRequested.set(true); // TODO use check and set
 
             for (Worker worker : workers) {
                 while (worker.isRunning) {
                     try {
                         TimeUnit.MILLISECONDS.sleep(100);
                     } catch (InterruptedException e) {
+
+                        worker.thread.interrupt();
                     }
                 }
                 worker.thread.interrupt();
@@ -210,7 +218,7 @@ public class Main {
                     break;
                 }
 
-                var lock = lockMap.get(data.task.taskGroup.groupUUID.toString());
+                var lock = lockMap.get(data.task.taskGroup.groupUUID.toString()); //
                 try {
                     lock.lock();
                     this.isRunning = true;
